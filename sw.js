@@ -4,7 +4,7 @@
 // dashboard instantly and fetches the fresh build in the background for next load.
 // CACHE_VERSION is rewritten on every deploy to invalidate old caches.
 
-const CACHE_VERSION = "v1778820833";
+const CACHE_VERSION = "v1778825766";
 const CACHE_NAME = `paper-trade-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
