@@ -1123,6 +1123,7 @@ details.glossary dd { color: var(--text-secondary); margin: 0; font-size: 12px; 
   if (!("serviceWorker" in navigator)) return;
   var banner = document.getElementById("pwa-update-banner");
   var registration = null;
+  var killswitchReloading = false;
 
   function showBanner() {
     if (!banner) return;
@@ -1138,8 +1139,16 @@ details.glossary dd { color: var(--text-secondary); margin: 0; font-size: 12px; 
   if (banner) banner.addEventListener("click", applyUpdate);
 
   navigator.serviceWorker.addEventListener("message", function (event) {
-    if (event.data && event.data.type === "UPDATE_READY") {
+    if (!event.data) return;
+    if (event.data.type === "UPDATE_READY") {
       showBanner();
+    } else if (event.data.type === "KILLSWITCH_RELOAD") {
+      if (killswitchReloading) return;
+      killswitchReloading = true;
+      // The kill-switch SW has just unregistered itself and cleared the
+      // caches. One clean reload pulls a fresh page direct from the
+      // network with no SW intercepting.
+      setTimeout(function () { window.location.reload(); }, 250);
     }
   });
 
@@ -1161,13 +1170,6 @@ details.glossary dd { color: var(--text-secondary); margin: 0; font-size: 12px; 
     }).catch(function (err) {
       console.warn("SW registration failed:", err);
     });
-  });
-
-  var refreshing = false;
-  navigator.serviceWorker.addEventListener("controllerchange", function () {
-    if (refreshing) return;
-    refreshing = true;
-    window.location.reload();
   });
 })();
 </script>
