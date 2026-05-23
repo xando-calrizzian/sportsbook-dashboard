@@ -14,7 +14,7 @@
 //
 // CACHE_VERSION is substituted by deploy_dashboard.py at push time.
 
-const CACHE_VERSION = "v1779570223";
+const CACHE_VERSION = "v1779573008";
 const CACHE_NAME = `paper-trade-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
