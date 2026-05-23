@@ -1,19 +1,33 @@
 // Service worker for the paper-trade dashboard.
-// Strategy: cache-first for shell assets (manifest, icons, the SW itself),
-// stale-while-revalidate for index.html so the phone shows the last-good
-// dashboard instantly and fetches the fresh build in the background for next load.
-// CACHE_VERSION is rewritten on every deploy to invalidate old caches.
+//
+// Strategy:
+//   - Network-first for HTML and JSON (the dashboard payload). When online
+//     the user always sees the freshest deploy on every load. When offline,
+//     fall back to the cached copy so the icon never opens to a broken page.
+//   - Cache-first for icons + manifest (rarely-changing shell). Bumping
+//     CACHE_VERSION on every deploy invalidates the whole namespace at once.
+//   - skipWaiting + clients.claim so a new SW takes over within seconds of
+//     the next page load -- no need to close and reopen the PWA.
+//   - On activate, postMessage UPDATE_READY to every controlled client.
+//     The client side shows a "tap to refresh" banner; tap sends back
+//     SKIP_WAITING (already done here, but kept for clarity) and reloads.
+//
+// CACHE_VERSION is substituted by deploy_dashboard.py at push time.
 
-const CACHE_VERSION = "v1779519484";
+const CACHE_VERSION = "v1779520559";
 const CACHE_NAME = `paper-trade-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
-  "./",
-  "./index.html",
   "./manifest.json",
+  "./icon-120.png",
+  "./icon-152.png",
+  "./icon-167.png",
+  "./icon-180.png",
   "./icon-192.png",
   "./icon-512.png",
 ];
+
+const HTML_NETWORK_TIMEOUT_MS = 5000;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -24,47 +38,85 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
         keys
           .filter((k) => k.startsWith("paper-trade-") && k !== CACHE_NAME)
           .map((k) => caches.delete(k))
-      )
-    )
+      );
+      await self.clients.claim();
+      const clientList = await self.clients.matchAll({ type: "window" });
+      for (const client of clientList) {
+        client.postMessage({ type: "UPDATE_READY", version: CACHE_VERSION });
+      }
+    })()
   );
-  self.clients.claim();
 });
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
+function networkWithTimeout(req, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("network_timeout")), ms);
+    fetch(req)
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
-  // Only handle same-origin requests
   if (url.origin !== self.location.origin) return;
 
-  const isHtml = url.pathname.endsWith("/") || url.pathname.endsWith("index.html");
+  const accept = req.headers.get("accept") || "";
+  const isHtml =
+    url.pathname.endsWith("/") ||
+    url.pathname.endsWith(".html") ||
+    accept.includes("text/html");
+  const isJson = url.pathname.endsWith(".json") || accept.includes("application/json");
 
-  if (isHtml) {
-    // Stale-while-revalidate for the dashboard HTML
+  // Network-first for HTML and JSON so updates land instantly when online.
+  if (isHtml || isJson) {
     event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match("./index.html");
-        const network = fetch(req)
-          .then((res) => {
-            if (res && res.status === 200) {
-              cache.put("./index.html", res.clone());
-            }
-            return res;
-          })
-          .catch(() => cached);
-        return cached || network;
-      })
+      (async () => {
+        try {
+          const fresh = await networkWithTimeout(req, HTML_NETWORK_TIMEOUT_MS);
+          if (fresh && fresh.status === 200) {
+            const cache = await caches.open(CACHE_NAME);
+            cache.put(req, fresh.clone());
+          }
+          return fresh;
+        } catch (err) {
+          const cached = await caches.match(req);
+          if (cached) return cached;
+          // Last-resort fallback to root cache for HTML, so the PWA still
+          // opens something rather than throwing a generic chrome error.
+          if (isHtml) {
+            const rootCached = await caches.match("./");
+            if (rootCached) return rootCached;
+          }
+          return new Response("offline", { status: 503, statusText: "offline" });
+        }
+      })()
     );
     return;
   }
 
-  // Cache-first for shell assets
+  // Cache-first for static shell.
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
