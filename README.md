@@ -1,8 +1,8 @@
-# Paper Trade Dashboard
+# Paper Trade Dashboard Placeholder
 
-Static HTML mirror of the paper-trade dashboard for the sportsbook strategy tracking project.
+Static no-data placeholder for the sportsbook paper-trade dashboard.
 
-This repo holds only the rendered output. The dashboard generator and source data live in a separate private workspace. Each day the generator pushes a fresh `index.html` here and GitHub Pages publishes it at the URL below.
+The real dashboard has moved behind the private Cloudflare Worker in the sportsbook workspace. This public repo intentionally does not contain embedded ledger data, strategy rows, capper details, or real-money records.
 
 ## Live URL
 
@@ -10,15 +10,15 @@ https://xando-calrizzian.github.io/sportsbook-dashboard/
 
 ## PWA
 
-The page is installable as a Progressive Web App. On iPhone Safari, tap Share, then Add to Home Screen. The icon lands on the home screen and opens fullscreen. The service worker caches the last-pushed dashboard so it still renders offline.
+The public service worker is a kill-switch surface. Its job is to clear stale public dashboard caches from previously installed clients.
 
 ## Layout
 
-- `index.html` overwritten on every push by the upstream generator.
+- `index.html` overwritten on every push by the upstream generator with a private-dashboard placeholder.
 - `manifest.json` declares the app shell to the browser.
-- `sw.js` service worker. Cache version string is bumped on every push to invalidate stale caches.
+- `sw.js` kill-switch service worker. Cache version string is bumped on every push to invalidate stale caches.
 - `icon-192.png`, `icon-512.png` app icons.
 
 ## Privacy
 
-No real money figures, ledger rows, or capper handles are committed here. All figures are paper money where 1 unit equals 1 dollar.
+No paper ledger data, strategy rows, capper handles, slip paths, or real-money rows are committed here.
