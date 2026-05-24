@@ -1,141 +1,54 @@
-// Service worker for the paper-trade dashboard.
+// KILL-SWITCH service worker.
 //
-// Strategy:
-//   - Network-first for HTML and JSON (the dashboard payload). When online
-//     the user always sees the freshest deploy on every load. When offline,
-//     fall back to the cached copy so the icon never opens to a broken page.
-//   - Cache-first for icons + manifest (rarely-changing shell). Bumping
-//     CACHE_VERSION on every deploy invalidates the whole namespace at once.
-//   - skipWaiting + clients.claim so a new SW takes over within seconds of
-//     the next page load -- no need to close and reopen the PWA.
-//   - On activate, postMessage UPDATE_READY to every controlled client.
-//     The client side shows a "tap to refresh" banner; tap sends back
-//     SKIP_WAITING (already done here, but kept for clarity) and reloads.
+// Purpose: recover from a wedged PWA state. On install, deletes every
+// paper-trade-* cache and unregisters this very registration so future
+// page loads bypass any service worker entirely until a new working one
+// is shipped. Posts KILLSWITCH_RELOAD to controlled clients so they do
+// one clean reload into the SW-free state.
 //
-// CACHE_VERSION is substituted by deploy_dashboard.py at push time.
+// The fetch handler is a no-op pass-through: never calls respondWith, so
+// the browser handles every request via the normal network. This also
+// works around any partial-response caching bug that the previous SW
+// may have introduced.
+//
+// CACHE_VERSION is substituted by deploy_dashboard.py at push time so
+// browsers see this as a "new" SW worth installing.
 
-const CACHE_VERSION = "v1779573008";
-const CACHE_NAME = `paper-trade-${CACHE_VERSION}`;
-
-const SHELL_ASSETS = [
-  "./manifest.json",
-  "./icon-120.png",
-  "./icon-152.png",
-  "./icon-167.png",
-  "./icon-180.png",
-  "./icon-192.png",
-  "./icon-512.png",
-];
-
-const HTML_NETWORK_TIMEOUT_MS = 5000;
+const CACHE_VERSION = "v1779581601";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS))
-  );
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((k) => k.startsWith("paper-trade-") && k !== CACHE_NAME)
+          .filter((k) => k.startsWith("paper-trade-"))
           .map((k) => caches.delete(k))
       );
+      await self.skipWaiting();
+    })()
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
       await self.clients.claim();
       const clientList = await self.clients.matchAll({ type: "window" });
       for (const client of clientList) {
-        client.postMessage({ type: "UPDATE_READY", version: CACHE_VERSION });
+        client.postMessage({ type: "KILLSWITCH_RELOAD", version: CACHE_VERSION });
+      }
+      try {
+        await self.registration.unregister();
+      } catch (e) {
+        // best-effort: even if unregister throws, the pass-through fetch
+        // handler below means we no longer interfere with page loads.
       }
     })()
   );
 });
 
-self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "SKIP_WAITING") {
-    self.skipWaiting();
-  }
-});
-
-function networkWithTimeout(req, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("network_timeout")), ms);
-    fetch(req)
-      .then((res) => {
-        clearTimeout(timer);
-        resolve(res);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
-
-self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return;
-
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-
-  const accept = req.headers.get("accept") || "";
-  const isHtml =
-    url.pathname.endsWith("/") ||
-    url.pathname.endsWith(".html") ||
-    accept.includes("text/html");
-  const isJson = url.pathname.endsWith(".json") || accept.includes("application/json");
-
-  // Network-first for HTML and JSON so updates land instantly when online.
-  // The response goes back to the page BEFORE we touch the cache, so any
-  // cache.put work cannot affect what the browser sees. The body is cloned
-  // up front (read-once safety) and the cache write is a fire-and-forget
-  // side effect.
-  if (isHtml || isJson) {
-    event.respondWith(
-      (async () => {
-        try {
-          const fresh = await networkWithTimeout(req, HTML_NETWORK_TIMEOUT_MS);
-          if (fresh && fresh.status === 200) {
-            const forCache = fresh.clone();
-            // Schedule the cache write without awaiting; never block the
-            // response return on it. Failures are swallowed so a flaky
-            // cache layer never breaks the page.
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(req, forCache).catch(() => {});
-            }).catch(() => {});
-          }
-          return fresh;
-        } catch (err) {
-          const cached = await caches.match(req);
-          if (cached) return cached;
-          // Last-resort fallback to root cache for HTML, so the PWA still
-          // opens something rather than throwing a generic chrome error.
-          if (isHtml) {
-            const rootCached = await caches.match("./");
-            if (rootCached) return rootCached;
-          }
-          return new Response("offline", { status: 503, statusText: "offline" });
-        }
-      })()
-    );
-    return;
-  }
-
-  // Cache-first for static shell.
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((res) => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-        }
-        return res;
-      });
-    })
-  );
+self.addEventListener("fetch", () => {
+  // Intentional no-op. Do not call event.respondWith. The browser handles
+  // every fetch via the normal network stack.
 });
