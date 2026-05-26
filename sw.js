@@ -14,7 +14,7 @@
 // CACHE_VERSION is substituted by deploy_dashboard.py at push time so
 // browsers see this as a "new" SW worth installing.
 
-const CACHE_VERSION = "v1779739138";
+const CACHE_VERSION = "v1779756494";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
